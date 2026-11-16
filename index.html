@@ -14,7 +14,7 @@ Changes made:
 - checks if the browser can run the game before loading
 - NEW: detects the device (phone, tablet or computer) and sets window.isMobileDevice for the game
 - NEW: add ?device=mobile or ?device=desktop to the link to force it for testing
-- NEW: the loading screen shows which device was detected
+- NEW: the device line on the loading screen was removed again
 - NEW: stops the page from scrolling, zooming or opening menus while you play on a touch screen
 - NEW: the page uses the real screen height on phones (100dvh)
 Files must be lowercase: index.js, index.wasm, index.pck
@@ -254,8 +254,6 @@ async function download(name) {
 }
 
 async function main() {
-	log('Device: ' + (window.isMobileDevice ? 'phone or tablet' : 'computer') + ' (' + window.deviceSource + ')');
-
 	if (typeof Engine === 'undefined') {
 		showError('index.js did not load. Check that it is in the repo and named in lowercase.');
 		return;
