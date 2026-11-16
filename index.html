@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Game</title>
 <!--
 Changes made:
@@ -10,6 +12,11 @@ Changes made:
 - shows each file being downloaded with its size
 - shows the engine messages and errors on screen so we can see why it gets stuck
 - checks if the browser can run the game before loading
+- NEW: detects the device (phone, tablet or computer) and sets window.isMobileDevice for the game
+- NEW: add ?device=mobile or ?device=desktop to the link to force it for testing
+- NEW: the loading screen shows which device was detected
+- NEW: stops the page from scrolling, zooming or opening menus while you play on a touch screen
+- NEW: the page uses the real screen height on phones (100dvh)
 Files must be lowercase: index.js, index.wasm, index.pck
 -->
 <style>
@@ -22,11 +29,23 @@ html, body {
 	overflow: hidden;
 	font-family: sans-serif;
 	color: #fff;
+	touch-action: none;
+	overscroll-behavior: none;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-touch-callout: none;
+	-webkit-tap-highlight-color: transparent;
+}
+@supports (height: 100dvh) {
+	html, body {
+		height: 100dvh;
+	}
 }
 #canvas {
 	display: block;
 	width: 100%;
 	height: 100%;
+	touch-action: none;
 }
 #loader {
 	position: absolute;
@@ -82,11 +101,44 @@ html, body {
 	font-size: 12px;
 	color: #aaa;
 	white-space: pre-wrap;
+	touch-action: pan-y;
 }
 #log .err {
 	color: #ff6b6b;
 }
 </style>
+<script>
+// finds out what device this is, the game reads window.isMobileDevice
+(function () {
+	var params = new URLSearchParams(window.location.search);
+	var forced = params.get('device');
+	var ua = navigator.userAgent || '';
+	var touchPoints = navigator.maxTouchPoints || 0;
+	var iPad = ua.indexOf('Macintosh') >= 0 && touchPoints > 1;
+	var phoneOrTablet = /Android|iPhone|iPad|iPod|Mobi|Tablet/i.test(ua) || iPad;
+
+	if (forced === 'mobile') {
+		window.isMobileDevice = true;
+		window.deviceSource = 'forced by link';
+	} else if (forced === 'desktop') {
+		window.isMobileDevice = false;
+		window.deviceSource = 'forced by link';
+	} else {
+		window.isMobileDevice = phoneOrTablet;
+		window.deviceSource = 'auto';
+	}
+	console.log('isMobileDevice:', window.isMobileDevice, '(' + window.deviceSource + ')');
+
+	// stops the page from scrolling, zooming or opening menus while playing
+	document.addEventListener('touchmove', function (e) {
+		if (e.target && e.target.id === 'canvas') {
+			e.preventDefault();
+		}
+	}, { passive: false });
+	document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+	document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+})();
+</script>
 </head>
 <body>
 <canvas id="canvas"></canvas>
@@ -202,6 +254,8 @@ async function download(name) {
 }
 
 async function main() {
+	log('Device: ' + (window.isMobileDevice ? 'phone or tablet' : 'computer') + ' (' + window.deviceSource + ')');
+
 	if (typeof Engine === 'undefined') {
 		showError('index.js did not load. Check that it is in the repo and named in lowercase.');
 		return;
