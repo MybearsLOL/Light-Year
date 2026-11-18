@@ -1,220 +1,251 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
-		<title>LOD planet</title>
-		<style>
-html, body, #canvas {
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+<title>Game</title>
+<!--
+Changes made:
+- loading screen with a progress bar and percent
+- shows each file being downloaded with its size
+- shows the engine messages and errors on screen so we can see why it gets stuck
+- checks if the browser can run the game before loading
+Files must be lowercase: index.js, index.wasm, index.pck
+-->
+<style>
+html, body {
 	margin: 0;
 	padding: 0;
-	border: 0;
-}
-
-body {
-	color: white;
-	background-color: black;
+	width: 100%;
+	height: 100%;
+	background: #000;
 	overflow: hidden;
-	touch-action: none;
+	font-family: sans-serif;
+	color: #fff;
 }
-
 #canvas {
 	display: block;
+	width: 100%;
+	height: 100%;
 }
-
-#canvas:focus {
-	outline: none;
-}
-
-#status, #status-splash, #status-progress {
+#loader {
 	position: absolute;
-	left: 0;
-	right: 0;
-}
-
-#status, #status-splash {
-	top: 0;
-	bottom: 0;
-}
-
-#status {
-	background-color: #242424;
+	inset: 0;
 	display: flex;
 	flex-direction: column;
-	justify-content: center;
 	align-items: center;
-	visibility: hidden;
+	justify-content: center;
+	background: #000;
+	padding: 20px;
+	box-sizing: border-box;
 }
-
-#status-splash {
-	max-height: 100%;
-	max-width: 100%;
-	margin: auto;
+#title {
+	font-size: 24px;
+	margin-bottom: 16px;
 }
-
-#status-splash.show-image--false {
-	display: none;
-}
-
-#status-splash.fullsize--true {
-	height: 100%;
-	width: 100%;
-	object-fit: contain;
-}
-
-#status-splash.use-filter--false {
-	image-rendering: pixelated;
-}
-
-#status-progress, #status-notice {
-	display: none;
-}
-
-#status-progress {
-	bottom: 10%;
-	width: 50%;
-	margin: 0 auto;
-}
-
-#status-notice {
-	background-color: #5b3943;
-	border-radius: 0.5rem;
-	border: 1px solid #9b3943;
-	color: #e0e0e0;
-	font-family: 'Noto Sans', 'Droid Sans', Arial, sans-serif;
-	line-height: 1.3;
-	margin: 0 2rem;
+#bar {
+	width: min(500px, 90%);
+	height: 16px;
+	background: #333;
+	border-radius: 8px;
 	overflow: hidden;
-	padding: 1rem;
-	text-align: center;
-	z-index: 1;
 }
-		</style>
-		<link id="-gd-engine-icon" rel="icon" type="image/png" href="Index.icon.png" />
-<link rel="apple-touch-icon" href="Index.apple-touch-icon.png"/>
+#fill {
+	width: 0%;
+	height: 100%;
+	background: #4da3ff;
+	transition: width 0.1s;
+}
+#percent {
+	margin-top: 10px;
+	font-size: 18px;
+}
+#files {
+	margin-top: 16px;
+	width: min(500px, 90%);
+	font-size: 14px;
+}
+.row {
+	display: flex;
+	justify-content: space-between;
+	padding: 3px 0;
+	border-bottom: 1px solid #222;
+}
+.row.done {
+	color: #6fdc6f;
+}
+#log {
+	margin-top: 16px;
+	width: min(500px, 90%);
+	max-height: 120px;
+	overflow: auto;
+	font-size: 12px;
+	color: #aaa;
+	white-space: pre-wrap;
+}
+#log .err {
+	color: #ff6b6b;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
 
-	</head>
-	<body>
-		<canvas id="canvas">
-			Your browser does not support the canvas tag.
-		</canvas>
+<div id="loader">
+	<div id="title">Loading game...</div>
+	<div id="bar"><div id="fill"></div></div>
+	<div id="percent">0%</div>
+	<div id="files"></div>
+	<div id="log"></div>
+</div>
 
-		<noscript>
-			Your browser does not support JavaScript.
-		</noscript>
+<script src="index.js"></script>
+<script>
+const FILES = ['index.wasm', 'index.pck'];
 
-		<div id="status">
-			<img id="status-splash" class="show-image--true fullsize--true use-filter--true" src="Index.png" alt="">
-			<progress id="status-progress"></progress>
-			<div id="status-notice"></div>
-		</div>
+const loader = document.getElementById('loader');
+const title = document.getElementById('title');
+const fill = document.getElementById('fill');
+const percent = document.getElementById('percent');
+const filesBox = document.getElementById('files');
+const logBox = document.getElementById('log');
 
-		<script src="Index.js"></script>
-		<script>
-const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"Index","experimentalVK":false,"fileSizes":{"Index.pck":633896,"Index.wasm":37902138},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
-const GODOT_THREADS_ENABLED = false;
-const engine = new Engine(GODOT_CONFIG);
+const info = {};
 
-(function () {
-	const statusOverlay = document.getElementById('status');
-	const statusProgress = document.getElementById('status-progress');
-	const statusNotice = document.getElementById('status-notice');
+function mb(bytes) {
+	return (bytes / 1048576).toFixed(1) + ' MB';
+}
 
-	let initializing = true;
-	let statusMode = '';
-
-	function setStatusMode(mode) {
-		if (statusMode === mode || !initializing) {
-			return;
-		}
-		if (mode === 'hidden') {
-			statusOverlay.remove();
-			initializing = false;
-			return;
-		}
-		statusOverlay.style.visibility = 'visible';
-		statusProgress.style.display = mode === 'progress' ? 'block' : 'none';
-		statusNotice.style.display = mode === 'notice' ? 'block' : 'none';
-		statusMode = mode;
+function log(text, isError) {
+	const line = document.createElement('div');
+	line.textContent = text;
+	if (isError) {
+		line.className = 'err';
 	}
-
-	function setStatusNotice(text) {
-		while (statusNotice.lastChild) {
-			statusNotice.removeChild(statusNotice.lastChild);
-		}
-		const lines = text.split('\n');
-		lines.forEach((line) => {
-			statusNotice.appendChild(document.createTextNode(line));
-			statusNotice.appendChild(document.createElement('br'));
-		});
+	logBox.appendChild(line);
+	while (logBox.children.length > 30) {
+		logBox.removeChild(logBox.firstChild);
 	}
+	logBox.scrollTop = logBox.scrollHeight;
+}
 
-	function displayFailureNotice(err) {
-		console.error(err);
-		if (err instanceof Error) {
-			setStatusNotice(err.message);
-		} else if (typeof err === 'string') {
-			setStatusNotice(err);
+function showError(text) {
+	title.textContent = 'Something went wrong';
+	log(text, true);
+}
+
+function setPercent(p) {
+	p = Math.max(0, Math.min(100, p));
+	fill.style.width = p + '%';
+	percent.textContent = Math.round(p) + '%';
+}
+
+function updateOverall() {
+	let loaded = 0;
+	let total = 0;
+	let allKnown = true;
+	for (const name of FILES) {
+		loaded += info[name].loaded;
+		if (info[name].total > 0) {
+			total += info[name].total;
 		} else {
-			setStatusNotice('An unknown error occurred.');
+			allKnown = false;
 		}
-		setStatusMode('notice');
-		initializing = false;
+	}
+	if (allKnown && total > 0) {
+		setPercent((loaded / total) * 100);
+	}
+}
+
+function makeRow(name) {
+	const row = document.createElement('div');
+	row.className = 'row';
+	const left = document.createElement('span');
+	left.textContent = name;
+	const right = document.createElement('span');
+	right.textContent = 'waiting';
+	row.appendChild(left);
+	row.appendChild(right);
+	filesBox.appendChild(row);
+	info[name] = { row: row, label: right, loaded: 0, total: 0 };
+}
+
+async function download(name) {
+	const item = info[name];
+	item.label.textContent = 'starting';
+	const res = await fetch(name, { cache: 'force-cache' });
+	if (!res.ok) {
+		throw new Error(name + ' not found (error ' + res.status + '). Check the file name is lowercase.');
+	}
+	item.total = Number(res.headers.get('Content-Length')) || 0;
+	const reader = res.body.getReader();
+	while (true) {
+		const result = await reader.read();
+		if (result.done) {
+			break;
+		}
+		item.loaded += result.value.length;
+		if (item.total > 0 && item.loaded > item.total) {
+			item.total = item.loaded;
+		}
+		if (item.total > 0) {
+			item.label.textContent = mb(item.loaded) + ' / ' + mb(item.total);
+		} else {
+			item.label.textContent = mb(item.loaded);
+		}
+		updateOverall();
+	}
+	item.total = item.loaded;
+	item.label.textContent = mb(item.loaded) + ' done';
+	item.row.className = 'row done';
+	updateOverall();
+}
+
+async function main() {
+	if (typeof Engine === 'undefined') {
+		showError('index.js did not load. Check that it is in the repo and named in lowercase.');
+		return;
 	}
 
-	const missing = Engine.getMissingFeatures({
-		threads: GODOT_THREADS_ENABLED,
+	const missing = Engine.getMissingFeatures({ threads: false });
+	if (missing.length > 0) {
+		showError('This browser cannot run the game. Missing: ' + missing.join(', '));
+		return;
+	}
+
+	for (const name of FILES) {
+		makeRow(name);
+	}
+
+	log('Downloading files...');
+	await Promise.all(FILES.map(download));
+	setPercent(100);
+
+	title.textContent = 'Starting game...';
+	log('Files downloaded, starting the engine');
+
+	const engine = new Engine({
+		executable: 'index',
+		canvas: document.getElementById('canvas'),
+		canvasResizePolicy: 2,
+		focusCanvas: true
 	});
 
-	if (missing.length !== 0) {
-		if (GODOT_CONFIG['serviceWorker'] && GODOT_CONFIG['ensureCrossOriginIsolationHeaders'] && 'serviceWorker' in navigator) {
-			let serviceWorkerRegistrationPromise;
-			try {
-				serviceWorkerRegistrationPromise = navigator.serviceWorker.getRegistration();
-			} catch (err) {
-				serviceWorkerRegistrationPromise = Promise.reject(new Error('Service worker registration failed.'));
-			}
-			// There's a chance that installing the service worker would fix the issue
-			Promise.race([
-				serviceWorkerRegistrationPromise.then((registration) => {
-					if (registration != null) {
-						return Promise.reject(new Error('Service worker already exists.'));
-					}
-					return registration;
-				}).then(() => engine.installServiceWorker()),
-				// For some reason, `getRegistration()` can stall
-				new Promise((resolve) => {
-					setTimeout(() => resolve(), 2000);
-				}),
-			]).then(() => {
-				// Reload if there was no error.
-				window.location.reload();
-			}).catch((err) => {
-				console.error('Error while registering service worker:', err);
-			});
-		} else {
-			// Display the message as usual
-			const missingMsg = 'Error\nThe following features required to run Godot projects on the Web are missing:\n';
-			displayFailureNotice(missingMsg + missing.join('\n'));
+	await engine.startGame({
+		onPrint: function () {
+			log(Array.prototype.slice.call(arguments).join(' '));
+		},
+		onPrintError: function () {
+			log(Array.prototype.slice.call(arguments).join(' '), true);
 		}
-	} else {
-		setStatusMode('progress');
-		engine.startGame({
-			'onProgress': function (current, total) {
-				if (current > 0 && total > 0) {
-					statusProgress.value = current;
-					statusProgress.max = total;
-				} else {
-					statusProgress.removeAttribute('value');
-					statusProgress.removeAttribute('max');
-				}
-			},
-		}).then(() => {
-			setStatusMode('hidden');
-		}, displayFailureNotice);
-	}
-}());
-		</script>
-	</body>
-</html>
+	});
 
+	loader.style.display = 'none';
+}
+
+main().catch(function (err) {
+	showError(err.message);
+});
+</script>
+</body>
+</html>
