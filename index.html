@@ -6,10 +6,11 @@
 <title>Game</title>
 <!--
 Changes made:
-- loading screen with a progress bar and percent
-- shows each file being downloaded with its size
-- shows the engine messages and errors on screen so we can see why it gets stuck
-- checks if the browser can run the game before loading
+- added a rotating white outline planet in the bottom right corner
+- loading bar and text are still in the middle
+- every chunk of the files that downloads is shown as hex code, like a hacker screen
+- added a giant text at the top that says which device you are on
+- kept the file list, the engine log and the browser check
 Files must be lowercase: index.js, index.wasm, index.pck
 -->
 <style>
@@ -20,7 +21,7 @@ html, body {
 	height: 100%;
 	background: #000;
 	overflow: hidden;
-	font-family: sans-serif;
+	font-family: 'Courier New', monospace;
 	color: #fff;
 }
 #canvas {
@@ -38,6 +39,57 @@ html, body {
 	background: #000;
 	padding: 20px;
 	box-sizing: border-box;
+	overflow: hidden;
+}
+#hack {
+	position: absolute;
+	inset: 0;
+	padding: 10px;
+	box-sizing: border-box;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+	font-size: 12px;
+	line-height: 1.35;
+	color: #1fbf4a;
+	opacity: 0.35;
+	white-space: pre;
+	pointer-events: none;
+}
+#device {
+	position: absolute;
+	top: 3%;
+	left: 0;
+	width: 100%;
+	text-align: center;
+	font-size: clamp(48px, 14vw, 180px);
+	font-weight: bold;
+	letter-spacing: 0.05em;
+	color: #fff;
+	opacity: 0.9;
+	text-shadow: 0 0 20px #4da3ff;
+	pointer-events: none;
+}
+#deviceinfo {
+	position: absolute;
+	top: calc(3% + clamp(60px, 17vw, 210px));
+	left: 0;
+	width: 100%;
+	text-align: center;
+	font-size: clamp(12px, 2vw, 18px);
+	color: #4da3ff;
+	pointer-events: none;
+}
+#center {
+	position: relative;
+	z-index: 2;
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	background: rgba(0, 0, 0, 0.7);
+	padding: 20px 0;
 }
 #title {
 	font-size: 24px;
@@ -86,17 +138,32 @@ html, body {
 #log .err {
 	color: #ff6b6b;
 }
+#planet {
+	position: absolute;
+	right: 20px;
+	bottom: 20px;
+	width: 160px;
+	height: 160px;
+	z-index: 3;
+	pointer-events: none;
+}
 </style>
 </head>
 <body>
 <canvas id="canvas"></canvas>
 
 <div id="loader">
-	<div id="title">Loading game...</div>
-	<div id="bar"><div id="fill"></div></div>
-	<div id="percent">0%</div>
-	<div id="files"></div>
-	<div id="log"></div>
+	<div id="hack"></div>
+	<div id="device">...</div>
+	<div id="deviceinfo"></div>
+	<div id="center">
+		<div id="title">Loading game...</div>
+		<div id="bar"><div id="fill"></div></div>
+		<div id="percent">0%</div>
+		<div id="files"></div>
+		<div id="log"></div>
+	</div>
+	<canvas id="planet" width="320" height="320"></canvas>
 </div>
 
 <script src="index.js"></script>
@@ -109,6 +176,10 @@ const fill = document.getElementById('fill');
 const percent = document.getElementById('percent');
 const filesBox = document.getElementById('files');
 const logBox = document.getElementById('log');
+const hackBox = document.getElementById('hack');
+const deviceBox = document.getElementById('device');
+const deviceInfo = document.getElementById('deviceinfo');
+const planet = document.getElementById('planet');
 
 const info = {};
 
@@ -170,6 +241,136 @@ function makeRow(name) {
 	info[name] = { row: row, label: right, loaded: 0, total: 0 };
 }
 
+/* device text */
+function detectDevice() {
+	const ua = navigator.userAgent || '';
+	const touch = (navigator.maxTouchPoints || 0) > 0;
+	const ipad = /iPad/.test(ua) || (/Macintosh/.test(ua) && touch);
+	if (ipad || /Tablet|PlayBook|Silk/i.test(ua) || (/Android/i.test(ua) && !/Mobile/i.test(ua))) {
+		return 'TABLET';
+	}
+	if (/iPhone|iPod|Android|Mobile|Phone/i.test(ua)) {
+		return 'MOBILE';
+	}
+	return 'DESKTOP';
+}
+
+function detectOS() {
+	const ua = navigator.userAgent || '';
+	if (/Android/i.test(ua)) return 'Android';
+	if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+	if (/Macintosh/i.test(ua)) return (navigator.maxTouchPoints > 0) ? 'iPadOS' : 'macOS';
+	if (/Windows/i.test(ua)) return 'Windows';
+	if (/CrOS/i.test(ua)) return 'ChromeOS';
+	if (/Linux/i.test(ua)) return 'Linux';
+	return 'Unknown OS';
+}
+
+function showDevice() {
+	deviceBox.textContent = detectDevice();
+	deviceInfo.textContent = detectOS() + '  |  ' + screen.width + 'x' + screen.height +
+		'  |  touch: ' + ((navigator.maxTouchPoints || 0) > 0 ? 'yes' : 'no');
+}
+
+/* hacker code feed */
+const hackQueue = [];
+const hackLines = [];
+let hackBusy = false;
+
+function hex(n, len) {
+	let s = n.toString(16).toUpperCase();
+	while (s.length < len) {
+		s = '0' + s;
+	}
+	return s;
+}
+
+function hackPush(name, bytes, offset) {
+	const perLine = 16;
+	const maxLines = 3;
+	const step = Math.max(perLine, Math.floor(bytes.length / maxLines));
+	for (let i = 0; i + 1 <= bytes.length && hackQueue.length < 200; i += step) {
+		let h = '';
+		let a = '';
+		for (let j = 0; j < perLine && i + j < bytes.length; j++) {
+			const b = bytes[i + j];
+			h += hex(b, 2) + ' ';
+			a += (b >= 32 && b < 127) ? String.fromCharCode(b) : '.';
+		}
+		hackQueue.push(name + ' 0x' + hex(offset + i, 8) + '  ' + h + ' |' + a + '|');
+	}
+	if (!hackBusy) {
+		hackBusy = true;
+		requestAnimationFrame(hackFlush);
+	}
+}
+
+function hackFlush() {
+	const rows = Math.ceil(window.innerHeight / 16) + 2;
+	let count = 0;
+	while (hackQueue.length > 0 && count < 6) {
+		hackLines.push(hackQueue.shift());
+		count++;
+	}
+	while (hackLines.length > rows) {
+		hackLines.shift();
+	}
+	hackBox.textContent = hackLines.join('\n');
+	if (hackQueue.length > 0) {
+		requestAnimationFrame(hackFlush);
+	} else {
+		hackBusy = false;
+	}
+}
+
+/* rotating planet */
+function startPlanet() {
+	const ctx = planet.getContext('2d');
+	const W = planet.width;
+	const R = W / 2 - 14;
+	const cx = W / 2;
+	const cy = W / 2;
+	let rot = 0;
+	let running = true;
+
+	function ellipse(x, y, rx, ry) {
+		ctx.beginPath();
+		ctx.ellipse(x, y, Math.max(rx, 0.01), Math.max(ry, 0.01), 0, 0, Math.PI * 2);
+		ctx.stroke();
+	}
+
+	function draw() {
+		if (!running) {
+			return;
+		}
+		ctx.clearRect(0, 0, W, W);
+		ctx.strokeStyle = '#fff';
+		ctx.lineWidth = 3;
+		ctx.beginPath();
+		ctx.arc(cx, cy, R, 0, Math.PI * 2);
+		ctx.stroke();
+		ctx.lineWidth = 1.5;
+		for (let k = 0; k < 6; k++) {
+			const a = rot + (k * Math.PI) / 6;
+			ellipse(cx, cy, Math.abs(Math.cos(a)) * R, R);
+		}
+		for (let l = -2; l <= 2; l++) {
+			const lat = (l * Math.PI) / 6;
+			const rx = Math.cos(lat) * R;
+			ctx.beginPath();
+			ctx.ellipse(cx, cy + Math.sin(lat) * R, rx, rx * 0.2, 0, 0, Math.PI * 2);
+			ctx.stroke();
+		}
+		rot += 0.012;
+		requestAnimationFrame(draw);
+	}
+
+	draw();
+	return function () {
+		running = false;
+	};
+}
+
 async function download(name) {
 	const item = info[name];
 	item.label.textContent = 'starting';
@@ -184,6 +385,7 @@ async function download(name) {
 		if (result.done) {
 			break;
 		}
+		hackPush(name, result.value, item.loaded);
 		item.loaded += result.value.length;
 		if (item.total > 0 && item.loaded > item.total) {
 			item.total = item.loaded;
@@ -202,6 +404,9 @@ async function download(name) {
 }
 
 async function main() {
+	showDevice();
+	const stopPlanet = startPlanet();
+
 	if (typeof Engine === 'undefined') {
 		showError('index.js did not load. Check that it is in the repo and named in lowercase.');
 		return;
@@ -240,6 +445,7 @@ async function main() {
 		}
 	});
 
+	stopPlanet();
 	loader.style.display = 'none';
 }
 
